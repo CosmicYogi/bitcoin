@@ -1,11 +1,13 @@
-// Copyright (c) 2015 The Bitcoin Core developers
+// Copyright (c) 2015-2016 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "chainparams.h"
+#include "streams.h"
 #include "zmqpublishnotifier.h"
-#include "main.h"
+#include "validation.h"
 #include "util.h"
+#include "rpc/server.h"
 
 static std::multimap<std::string, CZMQAbstractPublishNotifier*> mapPublishNotifiers;
 
@@ -28,6 +30,7 @@ static int zmq_send_multipart(void *sock, const void* data, size_t size, ...)
         if (rc != 0)
         {
             zmqError("Unable to initialize ZMQ msg");
+            va_end(args);
             return -1;
         }
 
@@ -41,6 +44,7 @@ static int zmq_send_multipart(void *sock, const void* data, size_t size, ...)
         {
             zmqError("Unable to send ZMQ msg");
             zmq_msg_close(&msg);
+            va_end(args);
             return -1;
         }
 
@@ -51,6 +55,7 @@ static int zmq_send_multipart(void *sock, const void* data, size_t size, ...)
 
         size = va_arg(args, size_t);
     }
+    va_end(args);
     return 0;
 }
 
@@ -165,7 +170,7 @@ bool CZMQPublishRawBlockNotifier::NotifyBlock(const CBlockIndex *pindex)
     LogPrint("zmq", "zmq: Publish rawblock %s\n", pindex->GetBlockHash().GetHex());
 
     const Consensus::Params& consensusParams = Params().GetConsensus();
-    CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+    CDataStream ss(SER_NETWORK, PROTOCOL_VERSION | RPCSerializationFlags());
     {
         LOCK(cs_main);
         CBlock block;
@@ -185,7 +190,7 @@ bool CZMQPublishRawTransactionNotifier::NotifyTransaction(const CTransaction &tr
 {
     uint256 hash = transaction.GetHash();
     LogPrint("zmq", "zmq: Publish rawtx %s\n", hash.GetHex());
-    CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+    CDataStream ss(SER_NETWORK, PROTOCOL_VERSION | RPCSerializationFlags());
     ss << transaction;
     return SendMessage(MSG_RAWTX, &(*ss.begin()), ss.size());
 }

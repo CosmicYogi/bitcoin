@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Bitcoin Core developers
+// Copyright (c) 2015-2016 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -372,7 +372,7 @@ private:
     struct event *reconnect_ev;
     float reconnect_timeout;
     CService service;
-    /** Cooie for SAFECOOKIE auth */
+    /** Cookie for SAFECOOKIE auth */
     std::vector<uint8_t> cookie;
     /** ClientNonce for SAFECOOKIE auth */
     std::vector<uint8_t> clientNonce;
@@ -470,7 +470,7 @@ void TorController::auth_cb(TorControlConnection& _conn, const TorControlReply& 
 
         // Finally - now create the service
         if (private_key.empty()) // No private key, generate one
-            private_key = "NEW:BEST";
+            private_key = "NEW:RSA1024"; // Explicitly request RSA1024 - see issue #9214
         // Request hidden service, redirect port.
         // Note that the 'virtual' port doesn't have to be the same as our internal port, but this is just a convenient
         // choice.  TODO; refactor the shutdown sequence some day.
@@ -501,10 +501,10 @@ static std::vector<uint8_t> ComputeResponse(const std::string &key, const std::v
 {
     CHMAC_SHA256 computeHash((const uint8_t*)key.data(), key.size());
     std::vector<uint8_t> computedHash(CHMAC_SHA256::OUTPUT_SIZE, 0);
-    computeHash.Write(begin_ptr(cookie), cookie.size());
-    computeHash.Write(begin_ptr(clientNonce), clientNonce.size());
-    computeHash.Write(begin_ptr(serverNonce), serverNonce.size());
-    computeHash.Finalize(begin_ptr(computedHash));
+    computeHash.Write(cookie.data(), cookie.size());
+    computeHash.Write(clientNonce.data(), clientNonce.size());
+    computeHash.Write(serverNonce.data(), serverNonce.size());
+    computeHash.Finalize(computedHash.data());
     return computedHash;
 }
 
@@ -662,26 +662,26 @@ void TorController::reconnect_cb(evutil_socket_t fd, short what, void *arg)
 }
 
 /****** Thread ********/
-struct event_base *base;
-boost::thread torControlThread;
+static struct event_base *gBase;
+static boost::thread torControlThread;
 
 static void TorControlThread()
 {
-    TorController ctrl(base, GetArg("-torcontrol", DEFAULT_TOR_CONTROL));
+    TorController ctrl(gBase, GetArg("-torcontrol", DEFAULT_TOR_CONTROL));
 
-    event_base_dispatch(base);
+    event_base_dispatch(gBase);
 }
 
 void StartTorControl(boost::thread_group& threadGroup, CScheduler& scheduler)
 {
-    assert(!base);
+    assert(!gBase);
 #ifdef WIN32
     evthread_use_windows_threads();
 #else
     evthread_use_pthreads();
 #endif
-    base = event_base_new();
-    if (!base) {
+    gBase = event_base_new();
+    if (!gBase) {
         LogPrintf("tor: Unable to create event_base\n");
         return;
     }
@@ -691,18 +691,18 @@ void StartTorControl(boost::thread_group& threadGroup, CScheduler& scheduler)
 
 void InterruptTorControl()
 {
-    if (base) {
+    if (gBase) {
         LogPrintf("tor: Thread interrupt\n");
-        event_base_loopbreak(base);
+        event_base_loopbreak(gBase);
     }
 }
 
 void StopTorControl()
 {
-    if (base) {
+    if (gBase) {
         torControlThread.join();
-        event_base_free(base);
-        base = 0;
+        event_base_free(gBase);
+        gBase = 0;
     }
 }
 
